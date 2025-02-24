@@ -130,5 +130,5 @@ async def run_inverter(ble_device: BLEDevice):
                 print(f"inverter: Connected to {ble_device.address}")
                 await run_from_single_ble_connection(client)
         except Exception as err:
-            print(f"Error occurred: {err}")
+            print(f"Error occurred: {err=} {type(err)=}")
             await asyncio.sleep(2.0)
