@@ -1,4 +1,5 @@
 import asyncio
+import asyncio.staggered
 
 from bleak import BleakScanner
 from bleak.backends.device import BLEDevice
@@ -14,7 +15,9 @@ async def run_async():
 
     async with asyncio.TaskGroup() as tg:
         tg.create_task(run_shunt(shunt_ble_device))
+        await asyncio.sleep(1.0)
         tg.create_task(run_charger(charger_ble_device))
+        await asyncio.sleep(1.0)
         tg.create_task(run_inverter(inverter_ble_device))
 
 

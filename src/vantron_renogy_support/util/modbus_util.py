@@ -1,8 +1,8 @@
-def field_slice(reg_word: int, len_bytes: int, start_word: int = 0) -> slice:
+def field_slice(reg_word: int, len_bytes: int, bytes: bytes, start_word: int = 0) -> bytes:
     i = (reg_word - start_word) * 2
-    return slice(i, i + len_bytes)
+    return bytes[slice(i, i + len_bytes)]
 
-def make_read_request(reg: int, word_len: int) -> bytes:
+def build_read_request(reg: int, word_len: int) -> bytes:
     """Constructs an array of bytes representing a modbus read request"""
     data = (
         [

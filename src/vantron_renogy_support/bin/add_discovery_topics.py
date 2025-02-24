@@ -15,11 +15,14 @@ def json_value(field: str) -> str:
 def shunt_state_topic(_) -> str:
     return f"{const.MQTT_SHUNT_STATE_TOPIC_PREFIX}/shunt/state"
 
+
 def charger_state_topic(_) -> str:
     return const.CHARGER_MQTT_STATE_TOPIC
 
+
 def inverter_state_topic(_) -> str:
     return const.CHARGER_MQTT_STATE_TOPIC
+
 
 def run():
     # Configure the required parameters for the MQTT broker
@@ -36,7 +39,6 @@ def run():
         manufacturer="Renogy",
         connections=[("ble_mac", const.SHUNT_ADDRESS)],
     )
-
 
     def shunt_infos(device_info: DeviceInfo):
         yield SensorInfo(
@@ -269,24 +271,62 @@ def run():
 
     inverter_info = DeviceInfo(
         name="Power Inverter",
-        identifiers=["RBC2125DS-21W"],
-        model="IP67 DCDC Charger with MPTT",
+        identifiers=["RIV1220PU-126-CA"],
+        model="2000W Pure Sine Wave Inverter",
         manufacturer="Renogy",
-        connections=[("ble_mac", const.CHARGER_ADDRESS)],
+        connections=[("ble_mac", const.INVERTER_ADDRESS)],
     )
 
     def inverter_infos(device_info: DeviceInfo):
         yield SensorInfo(
-            name="Charge Voltage",
+            name="Input Voltage",
             device=device_info,
             device_class="voltage",
             unit_of_measurement="V",
-            unique_id=f"{device_info.name}.charge_voltage",
-            value_template=json_value("charge_voltage"),
+            unique_id=f"{device_info.name}.input_voltage",
+            value_template=json_value("input_voltage"),
             expire_after=60,
         )
 
+        yield SensorInfo(
+            name="Input Current",
+            device=device_info,
+            device_class="current",
+            unit_of_measurement="A",
+            unique_id=f"{device_info.name}.input_current",
+            value_template=json_value("input_current"),
+            expire_after=60,
+        )
 
+        yield SensorInfo(
+            name="Output Voltage",
+            device=device_info,
+            device_class="voltage",
+            unit_of_measurement="V",
+            unique_id=f"{device_info.name}.output_voltage",
+            value_template=json_value("output_voltage"),
+            expire_after=60,
+        )
+
+        yield SensorInfo(
+            name="Output Current",
+            device=device_info,
+            device_class="current",
+            unit_of_measurement="A",
+            unique_id=f"{device_info.name}.output_current",
+            value_template=json_value("output_current"),
+            expire_after=60,
+        )
+
+        yield SensorInfo(
+            name="Output Frequency",
+            device=device_info,
+            device_class="frequency",
+            unit_of_measurement="Hz",
+            unique_id=f"{device_info.name}.output_frequency",
+            value_template=json_value("output_frequency"),
+            expire_after=60,
+        )
 
     for info in shunt_infos(shunt_info):
         # Instantiate the sensor
@@ -297,12 +337,20 @@ def run():
         if s is not None:
             s.wait_for_publish()
 
-
     for info in charger_infos(charger_info):
         # Instantiate the sensor
         s = Sensor(
             settings=Settings(mqtt=mqtt_settings, entity=info),
             make_state_topic=charger_state_topic,
+        ).write_config()
+        if s is not None:
+            s.wait_for_publish()
+
+    for info in inverter_infos(inverter_info):
+        # Instantiate the sensor
+        s = Sensor(
+            settings=Settings(mqtt=mqtt_settings, entity=info),
+            make_state_topic=inverter_state_topic,
         ).write_config()
         if s is not None:
             s.wait_for_publish()

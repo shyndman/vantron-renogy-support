@@ -1,6 +1,8 @@
 import asyncio
+import asyncio.staggered
 import binascii
 import functools
+import uuid
 from enum import Enum
 
 import annotated_types
@@ -8,13 +10,14 @@ from aiomqtt import Client as MqttClient
 from bleak import BleakClient
 from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError
-from pydantic import BaseModel, Strict
+from pydantic import BaseModel, NonNegativeFloat, PositiveFloat, Strict
+import pydantic
 from typing_extensions import Annotated
 
-from vantron_renogy_support.util.asyncio_util import periodic_task
-
 from . import const
-from .util.modbus_util import field_slice, make_read_request
+from .util.asyncio_util import periodic_task
+from .util.ble_util import read_modbus_from_device
+from .util.modbus_util import build_read_request, field_slice
 
 
 class PowerSavingMode(str, Enum):
@@ -31,12 +34,13 @@ BYTES_TO_POWER_SAVING_MODE = {
 
 
 class InverterInfo(BaseModel):
-    input_volts: float
-    input_current: float
+    battery_voltage: NonNegativeFloat
+    input_volts: NonNegativeFloat
+    input_current: NonNegativeFloat
 
-    output_volts: float
-    output_current: float
-    output_frequency: float
+    output_volts: NonNegativeFloat
+    output_current: NonNegativeFloat
+    output_frequency: NonNegativeFloat
 
     inverter_temperature: float
 
@@ -58,32 +62,33 @@ STATE_LEN = 7
 async def request_inverter_info(
     client: BleakClient, response_queue: asyncio.Queue
 ) -> InverterInfo:
-    print(f"inverter: Requesting 0x{STATE_START_WORD},{STATE_LEN}")
-    await client.write_gatt_char(
-        const.INVERTER_WRITE_CHARACTERISTIC,
-        make_read_request(STATE_START_WORD, STATE_LEN),
+    read = functools.partial(
+        read_modbus_from_device,
+        client=client,
+        response_queue=response_queue,
+        write_characteristic=const.INVERTER_WRITE_CHARACTERISTIC,
     )
-    state_bytes = await response_queue.get()
-    print(f"res: {binascii.hexlify(state_bytes, " ")}")
-
-    return parse_inverter_info(state_bytes[3:])
+    state_bytes = await read(STATE_START_WORD, STATE_LEN)
+    return parse_inverter_info(state_bytes)
 
 
 def parse_inverter_info(state_bytes: bytes) -> InverterInfo:
-    state_slice = functools.partial(field_slice, start_word=STATE_START_WORD)
+    state_slice = functools.partial(
+        field_slice, start_word=STATE_START_WORD, bytes=state_bytes
+    )
 
     return InverterInfo(
-        input_volts=int.from_bytes(state_bytes[state_slice(0x0FA0, 2)]) * 0.1,
-        input_current=int.from_bytes(state_bytes[state_slice(0x0FA1, 2)]) * 0.01,
-        output_volts=int.from_bytes(state_bytes[state_slice(0x0FA2, 2)]) * 0.1,
-        output_current=int.from_bytes(state_bytes[state_slice(0x0FA3, 2)], signed=True)
-        * 0.01,
-        output_frequency=int.from_bytes(state_bytes[state_slice(0x0FA4, 2)]) * 0.01,
-        inverter_temperature=int.from_bytes(state_bytes[state_slice(0x0FA6, 2)]) * 1.0,
+        battery_voltage=round(int.from_bytes(state_slice(0x0FA5, 2)) * 0.1, 1),
+        input_volts=int.from_bytes(state_slice(0x0FA0, 2)) * 0.1,
+        input_current=int.from_bytes(state_slice(0x0FA1, 2)) * 0.01,
+        output_volts=int.from_bytes(state_slice(0x0FA2, 2)) * 0.1,
+        output_current=int.from_bytes(state_slice(0x0FA3, 2), signed=True) * 0.01,
+        output_frequency=int.from_bytes(state_slice(0x0FA4, 2)) * 0.01,
+        inverter_temperature=int.from_bytes(state_slice(0x0FA6, 2), signed=True) * 1.0,
     )
 
 
-async def write_to_mqtt(info: InverterInfo):
+async def write_to_mqtt(info: InverterInfo) -> None:
     print(f"inverter: Writing data to MQTT: {info}")
 
     async with MqttClient(

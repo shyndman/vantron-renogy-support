@@ -1,5 +1,4 @@
 import asyncio
-import binascii
 import functools
 from enum import Enum
 
@@ -7,14 +6,13 @@ import annotated_types
 from aiomqtt import Client as MqttClient
 from bleak import BleakClient
 from bleak.backends.device import BLEDevice
-from bleak.exc import BleakError
-from pydantic import BaseModel, Strict
+from pydantic import BaseModel, NonNegativeFloat, NonNegativeInt, Strict
 from typing_extensions import Annotated
 
-from vantron_renogy_support.util.asyncio_util import periodic_task
-
 from . import const
-from .util.modbus_util import field_slice, make_read_request
+from .util.asyncio_util import periodic_task
+from .util.ble_util import read_modbus_from_device
+from .util.modbus_util import field_slice
 
 
 class ChargingState(str, Enum):
@@ -39,25 +37,25 @@ BYTE_TO_CHARGING_STATES = {
 
 
 class ChargerInfo(BaseModel):
-    charge_voltage: float
-    charge_current: float
-    charge_power: float
+    charge_voltage: NonNegativeFloat
+    charge_current: NonNegativeFloat
+    charge_power: NonNegativeFloat
 
-    starter_voltage: float
-    starter_current: float
-    starter_power: float
+    starter_voltage: NonNegativeFloat
+    starter_current: NonNegativeFloat
+    starter_power: NonNegativeFloat
 
-    solar_voltage: float
-    solar_current: float
+    solar_voltage: NonNegativeFloat
+    solar_current: NonNegativeFloat
 
     charger_temperature: float
     battery_temperature: float
 
-    total_operating_days: int
-    total_overdischarges: int
-    total_full_charges: int
-    total_charging_amp_hours: int
-    total_kwh_generated: float
+    total_operating_days: NonNegativeInt
+    total_overdischarges: NonNegativeInt
+    total_full_charges: NonNegativeInt
+    total_charging_amp_hours: NonNegativeInt
+    total_kwh_generated: NonNegativeFloat
 
     charging_state: ChargingState
     fault_bits: Annotated[
@@ -74,54 +72,44 @@ STATUS_LEN = 14
 async def request_charger_info(
     client: BleakClient, response_queue: asyncio.Queue
 ) -> ChargerInfo:
-    print(f"charger: Requesting 0x{STATE_START_WORD},{STATE_LEN}")
-    await client.write_gatt_char(
-        const.CHARGER_WRITE_CHARACTERISTIC,
-        make_read_request(STATE_START_WORD, STATE_LEN),
+    read = functools.partial(
+        read_modbus_from_device,
+        client=client,
+        response_queue=response_queue,
+        write_characteristic=const.CHARGER_WRITE_CHARACTERISTIC,
     )
-    state_bytes = await response_queue.get()
-    # print(f"res: {binascii.hexlify(state_bytes, " ")}")
-
-    print(f"charger: Requesting 0x{STATUS_START_WORD},{STATUS_LEN}")
-    await client.write_gatt_char(
-        const.CHARGER_WRITE_CHARACTERISTIC,
-        make_read_request(STATUS_START_WORD, STATUS_LEN),
+    return parse_charger_info(
+        state_bytes=await read(STATE_START_WORD, STATE_LEN),
+        status_bytes=await read(STATUS_START_WORD, STATUS_LEN),
     )
-    status_bytes = await response_queue.get()
-    # print(f"res: {binascii.hexlify(status_bytes, " ")}")
-
-    return parse_charger_info(state_bytes[3:], status_bytes[3:])
 
 
 def parse_charger_info(state_bytes: bytes, status_bytes: bytes) -> ChargerInfo:
-    state_slice = functools.partial(field_slice, start_word=STATE_START_WORD)
-    status_slice = functools.partial(field_slice, start_word=STATUS_START_WORD)
+    state_slice = functools.partial(
+        field_slice, start_word=STATE_START_WORD, bytes=state_bytes
+    )
+    status_slice = functools.partial(
+        field_slice, start_word=STATUS_START_WORD, bytes=status_bytes
+    )
 
     return ChargerInfo(
-        charge_voltage=round(
-            int.from_bytes(state_bytes[state_slice(0x101, 2)]) * 0.1, 2
-        ),
-        charge_current=int.from_bytes(state_bytes[state_slice(0x102, 2)]) * 0.01,
-        charge_power=int.from_bytes(state_bytes[state_slice(0x109, 2)]) * 1.0,
-        starter_voltage=int.from_bytes(state_bytes[state_slice(0x104, 2)]) * 0.1,
-        starter_current=int.from_bytes(state_bytes[state_slice(0x105, 2)]) * 0.01,
-        starter_power=int.from_bytes(state_bytes[state_slice(0x106, 2)]) * 1.0,
-        solar_voltage=int.from_bytes(state_bytes[state_slice(0x107, 2)]) * 0.1,
-        solar_current=int.from_bytes(state_bytes[state_slice(0x108, 2)]) * 0.01,
-        charger_temperature=int.from_bytes(
-            [state_bytes[state_slice(0x103, 2)][0]], signed=True
-        ),
-        battery_temperature=int.from_bytes(
-            [state_bytes[state_slice(0x103, 2)][1]], signed=True
-        ),
-        charging_state=BYTE_TO_CHARGING_STATES[status_bytes[status_slice(0x120, 2)][1]],
-        fault_bits=status_bytes[status_slice(0x121, 4)],
-        total_operating_days=int.from_bytes(status_bytes[status_slice(0x115, 2)]),
-        total_overdischarges=int.from_bytes(status_bytes[status_slice(0x116, 2)]),
-        total_full_charges=int.from_bytes(status_bytes[status_slice(0x117, 2)]),
-        total_charging_amp_hours=int.from_bytes(status_bytes[status_slice(0x118, 4)]),
-        total_kwh_generated=int.from_bytes(status_bytes[status_slice(0x11C, 4)])
-        * 0.001,
+        charge_voltage=round(int.from_bytes(state_slice(0x101, 2)) * 0.1, 2),
+        charge_current=int.from_bytes(state_slice(0x102, 2)) * 0.01,
+        charge_power=int.from_bytes(state_slice(0x109, 2)) * 1.0,
+        starter_voltage=int.from_bytes(state_slice(0x104, 2)) * 0.1,
+        starter_current=int.from_bytes(state_slice(0x105, 2)) * 0.01,
+        starter_power=int.from_bytes(state_slice(0x106, 2)) * 1.0,
+        solar_voltage=int.from_bytes(state_slice(0x107, 2)) * 0.1,
+        solar_current=int.from_bytes(state_slice(0x108, 2)) * 0.01,
+        charger_temperature=int.from_bytes([state_slice(0x103, 2)[0]], signed=True),
+        battery_temperature=int.from_bytes([state_slice(0x103, 2)[1]], signed=True),
+        charging_state=BYTE_TO_CHARGING_STATES[status_slice(0x120, 2)[1]],
+        fault_bits=status_slice(0x121, 4),
+        total_operating_days=int.from_bytes(status_slice(0x115, 2)),
+        total_overdischarges=int.from_bytes(status_slice(0x116, 2)),
+        total_full_charges=int.from_bytes(status_slice(0x117, 2)),
+        total_charging_amp_hours=int.from_bytes(status_slice(0x118, 4)),
+        total_kwh_generated=int.from_bytes(status_slice(0x11C, 4)) * 0.001,
     )
 
 
