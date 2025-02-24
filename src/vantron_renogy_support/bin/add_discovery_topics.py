@@ -21,7 +21,7 @@ def charger_state_topic(_) -> str:
 
 
 def inverter_state_topic(_) -> str:
-    return const.CHARGER_MQTT_STATE_TOPIC
+    return const.INVERTER_MQTT_STATE_TOPIC
 
 
 def run():
