@@ -67,6 +67,7 @@ async def request_inverter_info(
         client=client,
         response_queue=response_queue,
         write_characteristic=const.INVERTER_WRITE_CHARACTERISTIC,
+        timeout=5.0
     )
     state_bytes = await read(STATE_START_WORD, STATE_LEN)
     return parse_inverter_info(state_bytes)
