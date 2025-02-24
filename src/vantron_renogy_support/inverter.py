@@ -35,10 +35,10 @@ BYTES_TO_POWER_SAVING_MODE = {
 
 class InverterInfo(BaseModel):
     battery_voltage: NonNegativeFloat
-    input_volts: NonNegativeFloat
+    input_voltage: NonNegativeFloat
     input_current: NonNegativeFloat
 
-    output_volts: NonNegativeFloat
+    output_voltage: NonNegativeFloat
     output_current: NonNegativeFloat
     output_frequency: NonNegativeFloat
 
@@ -79,10 +79,10 @@ def parse_inverter_info(state_bytes: bytes) -> InverterInfo:
 
     return InverterInfo(
         battery_voltage=round(int.from_bytes(state_slice(0x0FA5, 2)) * 0.1, 1),
-        input_volts=int.from_bytes(state_slice(0x0FA0, 2)) * 0.1,
-        input_current=int.from_bytes(state_slice(0x0FA1, 2)) * 0.01,
-        output_volts=int.from_bytes(state_slice(0x0FA2, 2)) * 0.1,
-        output_current=int.from_bytes(state_slice(0x0FA3, 2), signed=True) * 0.01,
+        input_voltage=round(int.from_bytes(state_slice(0x0FA0, 2)) * 0.1, 2),
+        input_current=round(int.from_bytes(state_slice(0x0FA1, 2)) * 0.01, 2),
+        output_voltage=round(int.from_bytes(state_slice(0x0FA2, 2)) * 0.1, 2),
+        output_current=round(int.from_bytes(state_slice(0x0FA3, 2), signed=True) * 0.01, 2),
         output_frequency=int.from_bytes(state_slice(0x0FA4, 2)) * 0.01,
         inverter_temperature=int.from_bytes(state_slice(0x0FA6, 2), signed=True) * 0.1,
     )
