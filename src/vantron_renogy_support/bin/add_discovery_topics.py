@@ -328,6 +328,16 @@ def run():
             expire_after=60,
         )
 
+        yield SensorInfo(
+            name="Temperature",
+            device=device_info,
+            device_class="temperature",
+            unit_of_measurement="°C",
+            unique_id=f"{device_info.name}.inverter_temperature",
+            value_template=json_value("inverter_temperature"),
+            expire_after=60,
+        )
+
     for info in shunt_infos(shunt_info):
         # Instantiate the sensor
         s = Sensor(
