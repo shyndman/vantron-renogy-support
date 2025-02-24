@@ -84,7 +84,7 @@ def parse_inverter_info(state_bytes: bytes) -> InverterInfo:
         output_volts=int.from_bytes(state_slice(0x0FA2, 2)) * 0.1,
         output_current=int.from_bytes(state_slice(0x0FA3, 2), signed=True) * 0.01,
         output_frequency=int.from_bytes(state_slice(0x0FA4, 2)) * 0.01,
-        inverter_temperature=int.from_bytes(state_slice(0x0FA6, 2), signed=True) * 1.0,
+        inverter_temperature=int.from_bytes(state_slice(0x0FA6, 2), signed=True) * 0.1,
     )
 
 
