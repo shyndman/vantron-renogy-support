@@ -1,23 +1,17 @@
 import asyncio
 import asyncio.staggered
-import binascii
 import functools
-import uuid
 from enum import Enum
 
-import annotated_types
 from aiomqtt import Client as MqttClient
 from bleak import BleakClient
 from bleak.backends.device import BLEDevice
-from bleak.exc import BleakError
-from pydantic import BaseModel, NonNegativeFloat, PositiveFloat, Strict
-import pydantic
-from typing_extensions import Annotated
+from pydantic import BaseModel, NonNegativeFloat
 
 from . import const
 from .util.asyncio_util import periodic_task
 from .util.ble_util import read_modbus_from_device
-from .util.modbus_util import build_read_request, field_slice
+from .util.modbus_util import field_slice
 
 
 class PowerSavingMode(str, Enum):
@@ -67,7 +61,7 @@ async def request_inverter_info(
         client=client,
         response_queue=response_queue,
         write_characteristic=const.INVERTER_WRITE_CHARACTERISTIC,
-        timeout=5.0
+        timeout=5.0,
     )
     state_bytes = await read(STATE_START_WORD, STATE_LEN)
     return parse_inverter_info(state_bytes)
@@ -83,7 +77,9 @@ def parse_inverter_info(state_bytes: bytes) -> InverterInfo:
         input_voltage=round(int.from_bytes(state_slice(0x0FA0, 2)) * 0.1, 2),
         input_current=round(int.from_bytes(state_slice(0x0FA1, 2)) * 0.01, 2),
         output_voltage=round(int.from_bytes(state_slice(0x0FA2, 2)) * 0.1, 2),
-        output_current=round(int.from_bytes(state_slice(0x0FA3, 2), signed=True) * 0.01, 2),
+        output_current=round(
+            int.from_bytes(state_slice(0x0FA3, 2), signed=True) * 0.01, 2
+        ),
         output_frequency=int.from_bytes(state_slice(0x0FA4, 2)) * 0.01,
         inverter_temperature=int.from_bytes(state_slice(0x0FA6, 2), signed=True) * 0.1,
     )

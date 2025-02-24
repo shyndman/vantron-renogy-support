@@ -1,7 +1,8 @@
-from ha_mqtt_discoverable import Settings, DeviceInfo
+from ha_mqtt_discoverable import DeviceInfo, Settings
 from ha_mqtt_discoverable.sensors import Sensor, SensorInfo
-from vantron_renogy_support import const
-from vantron_renogy_support.charger import ChargingState
+
+from .. import const
+from ..charger import ChargingState
 
 
 def json_field_access(field: str) -> str:
