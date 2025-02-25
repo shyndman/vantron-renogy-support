@@ -1,6 +1,7 @@
 import asyncio
 import functools
 from enum import Enum
+from loguru import logger
 
 import annotated_types
 from aiomqtt import Client as MqttClient
@@ -8,6 +9,8 @@ from bleak import BleakClient
 from bleak.backends.device import BLEDevice
 from pydantic import BaseModel, NonNegativeFloat, NonNegativeInt, Strict
 from typing_extensions import Annotated
+
+from vantron_renogy_support.scanner import RenogyScanner
 
 from . import const
 from .util.asyncio_util import periodic_task
@@ -114,7 +117,7 @@ def parse_charger_info(state_bytes: bytes, status_bytes: bytes) -> ChargerInfo:
 
 
 async def write_to_mqtt(info: ChargerInfo):
-    print(f"charger: Writing data to MQTT: {info}")
+    logger.info(f"Writing data to MQTT: {info}")
 
     async with MqttClient(
         const.MQTT_HOST, identifier=const.MQTT_CLIENT, clean_session=True
@@ -129,10 +132,10 @@ async def run_from_single_ble_connection(client: BleakClient):
     response_queue: asyncio.Queue[bytes] = asyncio.Queue()
 
     async def on_notification(_, ntf_bytes: bytearray):
-        print("charger: Adding notification to queue")
+        logger.debug(f"on_notification")
         await response_queue.put(bytes(ntf_bytes))
 
-    print("charger: Starting notifications")
+    logger.debug("Starting notifications")
     await client.start_notify(
         const.CHARGER_NOTIFICATION_CHARACTERISTIC, callback=on_notification
     )
@@ -147,12 +150,18 @@ async def run_step(client: BleakClient, response_queue: asyncio.Queue[bytes]):
     await write_to_mqtt(info)
 
 
-async def run_charger(ble_device: BLEDevice):
+async def run_charger(scanner: RenogyScanner):
     while True:
+        device = await scanner.charger_device
         try:
-            async with BleakClient(ble_device.address) as client:
-                print(f"charger: Connected to {ble_device.address}")
+            if device is None:
+                logger.debug("Charger not found during discovery")
+                await asyncio.sleep(2.0)
+                continue
+
+            async with BleakClient(device) as client:
+                logger.info(f"Connected to {device}")
                 await run_from_single_ble_connection(client)
-        except Exception as err:
-            print(f"Error occurred: {err}")
+        except Exception:
+            logger.exception("Exception occurred. Reconnecting...")
             await asyncio.sleep(2.0)

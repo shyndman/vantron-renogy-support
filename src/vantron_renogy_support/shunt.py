@@ -1,18 +1,16 @@
 import asyncio
-import binascii
-import math
 from datetime import datetime, timezone
-from typing import Optional, SupportsIndex
+from typing import Optional
 
 from aiomqtt import Client as MqttClient
-from bleak import BleakClient, BleakScanner
+from bleak import BleakClient
 from bleak.backends.device import BLEDevice
-from bleak.exc import BleakError
-from pydantic import AwareDatetime, BaseModel, NonNegativeFloat, NonNegativeInt
+from loguru import logger
+from pydantic import BaseModel, NonNegativeFloat
 
 from . import const
+from .scanner import RenogyScanner
 from .util.asyncio_util import periodic_task
-from .util.datetime_util import seconds_ago
 
 # Cheeky cheeky global state
 raw_notification = None
@@ -20,30 +18,34 @@ notification_count = 0
 
 
 async def read_from_ble_shunt(
-    ble_device: BLEDevice, trigger_ble_reconnect: asyncio.Event
+    scanner: RenogyScanner, trigger_ble_reconnect: asyncio.Event
 ):
-    while True:
-        try:
-            await read_from_single_shunt_connection(ble_device, trigger_ble_reconnect)
-        except Exception as err:
-            print(f"Error occurred: {err}")
-            await asyncio.sleep(5.0)
+    device = await scanner.shunt_device
+    try:
+        if device is None:
+            logger.debug("Inverter not found during discovery")
+            raise ConnectionError()
+        await read_from_single_shunt_connection(device, trigger_ble_reconnect)
+    except Exception:
+        logger.exception("Error occurred")
+        await asyncio.sleep(3.0)
 
 
 async def read_from_single_shunt_connection(
     ble_device: BLEDevice, trigger_ble_reconnect: asyncio.Event
 ):
-    async with BleakClient(ble_device.address) as client:
-        print(f"Connected: {ble_device}")
+    async with BleakClient(ble_device) as client:
+        logger.info(f"Connected to device at {ble_device}")
 
         def notification_handler(_, msg_bytes: bytearray):
+            logger.trace(f"Notification received, {msg_bytes}")
             global raw_notification, notification_count
 
             if msg_bytes[0x03] == 0x19:
                 raw_notification = (datetime.now(tz=timezone.utc), msg_bytes)
                 notification_count += 1
 
-        print("Starting notifications")
+        logger.debug("Starting notifications")
         await client.start_notify(
             const.SHUNT_NOTIFICATION_CHARACTERISTIC, notification_handler
         )
@@ -52,8 +54,6 @@ async def read_from_single_shunt_connection(
 
 
 class ShuntInfo(BaseModel):
-    # elapsed_ticks: NonNegativeInt
-    # period_start_ts: AwareDatetime
     house_battery_current: float
     house_battery_voltage: NonNegativeFloat
     house_battery_temperature: Optional[float]
@@ -88,10 +88,6 @@ def parse_shunt_information(received_ts: datetime, notification_bytes: bytearray
         vehicle_battery_temperature=parse_optional_temperature(
             notification_bytes, 0x46
         ),
-        # elapsed_ticks=ticks,
-        # raw_hex_bytes=str(binascii.hexlify(notification_bytes)),
-        # period_start_ts=rounded_start_ts,
-        # another_time=int.from_bytes(notification_bytes[0x6C : (0x6D + 1)]),
     )
 
 
@@ -116,28 +112,28 @@ async def write_shunt_data(ctx: dict, trigger_ble_reconnect: asyncio.Event):
     global raw_notification, notification_count
 
     if raw_notification is None:
-        print("MQTT: no data to write")
+        logger.debug("MQTT: no data to write")
     elif ctx["last_write"] == notification_count:
-        print("MQTT: no new data since last write. Triggering reconnect")
+        logger.info("MQTT: no new data since last write. Triggering reconnect")
         trigger_ble_reconnect.set()
     else:
-        print(f"Writing shunt data: {notification_count}")
         ctx["last_write"] = notification_count
 
         received_ts, notification_bytes = raw_notification
         info = parse_shunt_information(received_ts, notification_bytes)
+        logger.info(f"Writing shunt update, {info}")
 
         async with MqttClient(
             const.MQTT_HOST, identifier=const.MQTT_CLIENT, clean_session=True
         ) as client:
             await client.publish(
-                f"{const.MQTT_SHUNT_STATE_TOPIC_PREFIX}/shunt/state",
+                f"{const.SHUNT_MQTT_STATE_TOPIC}",
                 payload=info.model_dump_json(),
             )
 
 
-async def run(ble_device: BLEDevice):
+async def run(scanner: RenogyScanner):
     reconnect_trigger = asyncio.Event()
     async with asyncio.TaskGroup() as tg:
-        tg.create_task(read_from_ble_shunt(ble_device, reconnect_trigger))
+        tg.create_task(read_from_ble_shunt(scanner, reconnect_trigger))
         tg.create_task(mqtt_task(reconnect_trigger))

@@ -6,9 +6,11 @@ from enum import Enum
 from aiomqtt import Client as MqttClient
 from bleak import BleakClient
 from bleak.backends.device import BLEDevice
+from loguru import logger
 from pydantic import BaseModel, NonNegativeFloat
 
 from . import const
+from .scanner import RenogyScanner
 from .util.asyncio_util import periodic_task
 from .util.ble_util import read_modbus_from_device
 from .util.modbus_util import field_slice
@@ -86,7 +88,7 @@ def parse_inverter_info(state_bytes: bytes) -> InverterInfo:
 
 
 async def write_to_mqtt(info: InverterInfo) -> None:
-    print(f"inverter: Writing data to MQTT: {info}")
+    logger.info(f"Writing update to MQTT: {info}")
 
     async with MqttClient(
         const.MQTT_HOST, identifier=const.MQTT_CLIENT, clean_session=True
@@ -101,10 +103,10 @@ async def run_from_single_ble_connection(client: BleakClient):
     response_queue: asyncio.Queue[bytes] = asyncio.Queue()
 
     async def on_notification(_, ntf_bytes: bytearray):
-        print("inverter: Adding notification to queue")
+        logger.debug("on_notification")
         await response_queue.put(bytes(ntf_bytes))
 
-    print("inverter: Starting notifications")
+    logger.debug(f"Starting notifications")
     await client.start_notify(
         const.INVERTER_NOTIFICATION_CHARACTERISTIC, callback=on_notification
     )
@@ -119,12 +121,18 @@ async def run_step(client: BleakClient, response_queue: asyncio.Queue[bytes]):
     await write_to_mqtt(info)
 
 
-async def run_inverter(ble_device: BLEDevice):
+async def run_inverter(scanner: RenogyScanner):
     while True:
+        device = await scanner.inverter_device
         try:
-            async with BleakClient(ble_device.address) as client:
-                print(f"inverter: Connected to {ble_device.address}")
+            if device is None:
+                logger.debug("Inverter not found during discovery")
+                await asyncio.sleep(2.0)
+                continue
+
+            async with BleakClient(device) as client:
+                logger.info(f"Connected to {device}")
                 await run_from_single_ble_connection(client)
-        except Exception as err:
-            print(f"Error occurred: {err=} {type(err)=}")
+        except Exception:
+            logger.exception("Exception occurred. Reconnecting...")
             await asyncio.sleep(2.0)

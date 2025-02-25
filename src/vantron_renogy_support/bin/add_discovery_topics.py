@@ -1,3 +1,4 @@
+import os
 from ha_mqtt_discoverable import DeviceInfo, Settings
 from ha_mqtt_discoverable.sensors import Sensor, SensorInfo
 
@@ -14,7 +15,7 @@ def json_value(field: str) -> str:
 
 
 def shunt_state_topic(_) -> str:
-    return f"{const.MQTT_SHUNT_STATE_TOPIC_PREFIX}/shunt/state"
+    return f"{const.SHUNT_MQTT_STATE_TOPIC}"
 
 
 def charger_state_topic(_) -> str:
@@ -38,7 +39,7 @@ def run():
         identifiers=["RTMShunt30038000437"],
         model="Shunt 300",
         manufacturer="Renogy",
-        connections=[("ble_mac", const.SHUNT_ADDRESS)],
+        connections=[("ble_mac", os.environ[const.ENV_SHUNT_BLE_ADDRESS])],
     )
 
     def shunt_infos(device_info: DeviceInfo):
@@ -108,7 +109,7 @@ def run():
         identifiers=["RBC2125DS-21W"],
         model="IP67 DCDC Charger with MPTT",
         manufacturer="Renogy",
-        connections=[("ble_mac", const.CHARGER_ADDRESS)],
+        connections=[("ble_mac", os.environ[const.ENV_CHARGER_BLE_ADDRESS])],
     )
 
     def charger_infos(device_info: DeviceInfo):
@@ -275,7 +276,7 @@ def run():
         identifiers=["RIV1220PU-126-CA"],
         model="2000W Pure Sine Wave Inverter",
         manufacturer="Renogy",
-        connections=[("ble_mac", const.INVERTER_ADDRESS)],
+        connections=[("ble_mac", os.environ[const.ENV_INVERTER_BLE_ADDRESS])],
     )
 
     def inverter_infos(device_info: DeviceInfo):

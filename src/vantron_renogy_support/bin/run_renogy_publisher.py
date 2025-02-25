@@ -1,8 +1,12 @@
 import asyncio
 import asyncio.staggered
+import os
 
 from bleak import BleakScanner
 from bleak.backends.device import BLEDevice
+from loguru import logger
+
+from ..scanner import RenogyScanner
 
 from .. import const
 from ..charger import run_charger
@@ -11,53 +15,33 @@ from ..shunt import run as run_shunt
 
 
 async def run_async():
-    shunt_ble_device, charger_ble_device, inverter_ble_device = await find_ble_devices()
+    logger.info("Finding Renogy devices")
 
-    async with asyncio.TaskGroup() as tg:
-        tg.create_task(run_shunt(shunt_ble_device))
-        await asyncio.sleep(1.0)
-        tg.create_task(run_charger(charger_ble_device))
-        await asyncio.sleep(1.0)
-        tg.create_task(run_inverter(inverter_ble_device))
+    assert_environment(const.ENV_CHARGER_BLE_ADDRESS)
+    assert_environment(const.ENV_INVERTER_BLE_ADDRESS)
+    assert_environment(const.ENV_SHUNT_BLE_ADDRESS)
+
+    scanner = RenogyScanner(
+        charger_ble_address=os.environ[const.ENV_CHARGER_BLE_ADDRESS],
+        inverter_ble_address=os.environ[const.ENV_INVERTER_BLE_ADDRESS],
+        shunt_ble_address=os.environ[const.ENV_SHUNT_BLE_ADDRESS],
+    )
+
+    async with scanner:
+        # Give the scanner a few seconds to go at it
+        logger.info("Scan for BLE devices")
+        await asyncio.sleep(10.0)
+
+        logger.info("Beginning device information publishing tasks")
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(run_shunt(scanner))
+            tg.create_task(run_charger(scanner))
+            tg.create_task(run_inverter(scanner))
 
 
-async def find_ble_devices() -> tuple[BLEDevice, BLEDevice, BLEDevice]:
-    shunt_ble_device = None
-    charger_ble_device = None
-    inverter_ble_device = None
-
-    while shunt_ble_device is None:
-        shunt_ble_device = await BleakScanner.find_device_by_address(
-            const.SHUNT_ADDRESS
-        )
-        if shunt_ble_device is None:
-            print(f"could not find device with address '{const.SHUNT_ADDRESS}'")
-            print(f"trying again in 5 seconds")
-            await asyncio.sleep(5.0)
-            continue
-
-    while charger_ble_device is None:
-        charger_ble_device = await BleakScanner.find_device_by_address(
-            const.CHARGER_ADDRESS
-        )
-        if charger_ble_device is None:
-            print(f"could not find device with address '{const.CHARGER_ADDRESS}'")
-            print(f"trying again in 5 seconds")
-            await asyncio.sleep(5.0)
-            continue
-
-    while inverter_ble_device is None:
-        inverter_ble_device = await BleakScanner.find_device_by_address(
-            const.INVERTER_ADDRESS
-        )
-        if inverter_ble_device is None:
-            print(f"could not find device with address '{const.INVERTER_ADDRESS}'")
-            print(f"trying again in 5 seconds")
-            await asyncio.sleep(5.0)
-            continue
-
-    return shunt_ble_device, charger_ble_device, inverter_ble_device
-
+def assert_environment(env_name: str):
+    if env_name not in os.environ:
+        raise AssertionError(f"{env_name} not found in environment")
 
 def run():
     asyncio.run(run_async())
