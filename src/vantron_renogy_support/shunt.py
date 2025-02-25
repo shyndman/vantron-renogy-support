@@ -9,7 +9,6 @@ from loguru import logger
 from pydantic import BaseModel, NonNegativeFloat
 
 from . import const
-from .scanner import RenogyScanner
 from .util.asyncio_util import periodic_task
 
 # Cheeky cheeky global state
@@ -17,25 +16,21 @@ raw_notification = None
 notification_count = 0
 
 
-async def read_from_ble_shunt(
-    scanner: RenogyScanner, trigger_ble_reconnect: asyncio.Event
-):
-    ble_device = await scanner.shunt_device
-    try:
-        if ble_device is None:
-            logger.warning("Shunt not found during discovery")
-            raise ConnectionError()
-        await read_from_single_shunt_connection(ble_device, trigger_ble_reconnect)
-    except Exception:
-        logger.exception("Error occurred")
-        await asyncio.sleep(3.0)
+async def read_from_ble_shunt(ble_address: str, trigger_ble_reconnect: asyncio.Event):
+    while True:
+        try:
+            await read_from_single_shunt_connection(ble_address, trigger_ble_reconnect)
+        except Exception:
+            logger.exception("Error occurred")
+        finally:
+            await asyncio.sleep(3.0)
 
 
 async def read_from_single_shunt_connection(
-    ble_device: BLEDevice, trigger_ble_reconnect: asyncio.Event
+    ble_address: str, trigger_ble_reconnect: asyncio.Event
 ):
-    async with BleakClient(ble_device) as client:
-        logger.info(f"Connected to device at {ble_device}")
+    async with BleakClient(ble_address) as client:
+        logger.info(f"Connected to device at {ble_address}")
 
         def notification_handler(_, msg_bytes: bytearray):
             logger.trace(f"Notification received, {msg_bytes}")
@@ -124,8 +119,8 @@ async def write_shunt_data(ctx: dict, trigger_ble_reconnect: asyncio.Event):
             )
 
 
-async def run(scanner: RenogyScanner):
+async def publish_shunt_state(ble_address: str):
     reconnect_trigger = asyncio.Event()
     async with asyncio.TaskGroup() as tg:
-        tg.create_task(read_from_ble_shunt(scanner, reconnect_trigger))
+        tg.create_task(read_from_ble_shunt(ble_address, reconnect_trigger))
         tg.create_task(mqtt_task(reconnect_trigger))

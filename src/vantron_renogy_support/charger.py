@@ -1,15 +1,13 @@
 import asyncio
 import functools
 from enum import Enum
-from loguru import logger
 
 import annotated_types
 from aiomqtt import Client as MqttClient
 from bleak import BleakClient
+from loguru import logger
 from pydantic import BaseModel, NonNegativeFloat, NonNegativeInt, Strict
 from typing_extensions import Annotated
-
-from vantron_renogy_support.scanner import RenogyScanner
 
 from . import const
 from .util.asyncio_util import periodic_task
@@ -63,6 +61,28 @@ class ChargerInfo(BaseModel):
     fault_bits: Annotated[
         bytes, Strict(), annotated_types.Len(min_length=4, max_length=4)
     ]
+
+
+async def run_from_single_ble_connection(client: BleakClient):
+    response_queue: asyncio.Queue[bytes] = asyncio.Queue()
+
+    async def on_notification(_, ntf_bytes: bytearray):
+        logger.trace(f"Received notification")
+        await response_queue.put(bytes(ntf_bytes))
+
+    logger.debug("Starting notifications")
+    await client.start_notify(
+        const.CHARGER_NOTIFICATION_CHARACTERISTIC, callback=on_notification
+    )
+
+    await periodic_task(
+        const.CHARGER_PUBLISH_INTERVAL, lambda: run_step(client, response_queue)
+    )
+
+
+async def run_step(client: BleakClient, response_queue: asyncio.Queue[bytes]):
+    info = await request_charger_info(client, response_queue)
+    await write_to_mqtt(info)
 
 
 STATE_START_WORD = 0x101
@@ -127,40 +147,15 @@ async def write_to_mqtt(info: ChargerInfo):
         )
 
 
-async def run_from_single_ble_connection(client: BleakClient):
-    response_queue: asyncio.Queue[bytes] = asyncio.Queue()
-
-    async def on_notification(_, ntf_bytes: bytearray):
-        logger.trace(f"Received notification")
-        await response_queue.put(bytes(ntf_bytes))
-
-    logger.debug("Starting notifications")
-    await client.start_notify(
-        const.CHARGER_NOTIFICATION_CHARACTERISTIC, callback=on_notification
-    )
-
-    await periodic_task(
-        const.CHARGER_PUBLISH_INTERVAL, lambda: run_step(client, response_queue)
-    )
-
-
-async def run_step(client: BleakClient, response_queue: asyncio.Queue[bytes]):
-    info = await request_charger_info(client, response_queue)
-    await write_to_mqtt(info)
-
-
-async def run_charger(scanner: RenogyScanner):
+async def publish_charger_state(ble_address: str):
     while True:
-        device = await scanner.charger_device
         try:
-            if device is None:
-                logger.warning("Charger not found during discovery")
-                await asyncio.sleep(2.0)
-                continue
-
-            async with BleakClient(device) as client:
-                logger.info(f"Connected to {device}")
+            async with BleakClient(ble_address) as client:
+                logger.info(f"Connected to {ble_address}")
                 await run_from_single_ble_connection(client)
+        except ConnectionError:
+            logger.debug("Connection error occurred. Reconnecting…")
         except Exception:
-            logger.exception("Exception occurred. Reconnecting...")
+            logger.exception("Exception occurred. Reconnecting…")
+        finally:
             await asyncio.sleep(2.0)

@@ -10,7 +10,6 @@ from loguru import logger
 from pydantic import BaseModel, NonNegativeFloat
 
 from . import const
-from .scanner import RenogyScanner
 from .util.asyncio_util import periodic_task
 from .util.ble_util import read_modbus_from_device
 from .util.modbus_util import field_slice
@@ -121,18 +120,16 @@ async def run_step(client: BleakClient, response_queue: asyncio.Queue[bytes]):
     await write_to_mqtt(info)
 
 
-async def run_inverter(scanner: RenogyScanner):
+async def publish_inverter_state(ble_address: str):
     while True:
-        device = await scanner.inverter_device
         try:
-            if device is None:
-                logger.debug("Inverter not found during discovery")
-                await asyncio.sleep(2.0)
-                continue
-
-            async with BleakClient(device) as client:
-                logger.info(f"Connected to {device}")
+            async with BleakClient(ble_address) as client:
+                logger.info(f"Connected to {ble_address}")
                 await run_from_single_ble_connection(client)
+
+        except ConnectionError:
+            logger.debug(f"Failed to connect to {ble_address}. Reconnecting…")
         except Exception:
-            logger.exception("Exception occurred. Reconnecting...")
+            logger.exception("Exception occurred. Reconnecting…")
+        finally:
             await asyncio.sleep(2.0)

@@ -3,45 +3,40 @@ import asyncio.staggered
 import os
 
 from bleak import BleakScanner
-from bleak.backends.device import BLEDevice
 from loguru import logger
 
-from ..scanner import RenogyScanner
 
 from .. import const
-from ..charger import run_charger
-from ..inverter import run_inverter
-from ..shunt import run as run_shunt
+from ..charger import publish_charger_state
+from ..inverter import publish_inverter_state
+from ..shunt import publish_shunt_state
 
 
 async def run_async():
     logger.info("Finding Renogy devices")
+    shunt_address = assert_environment(const.ENV_SHUNT_BLE_ADDRESS)
+    await BleakScanner.find_device_by_address(shunt_address)
 
-    assert_environment(const.ENV_CHARGER_BLE_ADDRESS)
-    assert_environment(const.ENV_INVERTER_BLE_ADDRESS)
-    assert_environment(const.ENV_SHUNT_BLE_ADDRESS)
+    charger_address = assert_environment(const.ENV_CHARGER_BLE_ADDRESS)
+    await BleakScanner.find_device_by_address(charger_address)
 
-    scanner = RenogyScanner(
-        charger_ble_address=os.environ[const.ENV_CHARGER_BLE_ADDRESS],
-        inverter_ble_address=os.environ[const.ENV_INVERTER_BLE_ADDRESS],
-        shunt_ble_address=os.environ[const.ENV_SHUNT_BLE_ADDRESS],
-    )
+    inverter_address = assert_environment(const.ENV_INVERTER_BLE_ADDRESS)
+    await BleakScanner.find_device_by_address(inverter_address)
 
-    async with scanner:
-        # Give the scanner a few seconds to go at it
-        logger.info("Scan for BLE devices")
-        await asyncio.sleep(10.0)
-
-        logger.info("Beginning device information publishing tasks")
-        async with asyncio.TaskGroup() as tg:
-            tg.create_task(run_shunt(scanner))
-            tg.create_task(run_charger(scanner))
-            tg.create_task(run_inverter(scanner))
+    logger.info("Beginning device information publishing tasks")
+    async with asyncio.TaskGroup() as tg:
+        tg.create_task(publish_shunt_state(shunt_address))
+        await asyncio.sleep(3.0)
+        tg.create_task(publish_charger_state(charger_address))
+        await asyncio.sleep(3.0)
+        tg.create_task(publish_inverter_state(inverter_address))
 
 
-def assert_environment(env_name: str):
+def assert_environment(env_name: str) -> str:
     if env_name not in os.environ:
         raise AssertionError(f"{env_name} not found in environment")
+    return os.environ[env_name]
+
 
 def run():
     asyncio.run(run_async())
