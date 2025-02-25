@@ -103,7 +103,7 @@ async def run_from_single_ble_connection(client: BleakClient):
     response_queue: asyncio.Queue[bytes] = asyncio.Queue()
 
     async def on_notification(_, ntf_bytes: bytearray):
-        logger.debug("on_notification")
+        logger.trace("Notification received")
         await response_queue.put(bytes(ntf_bytes))
 
     logger.debug(f"Starting notifications")

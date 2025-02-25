@@ -6,7 +6,6 @@ from loguru import logger
 import annotated_types
 from aiomqtt import Client as MqttClient
 from bleak import BleakClient
-from bleak.backends.device import BLEDevice
 from pydantic import BaseModel, NonNegativeFloat, NonNegativeInt, Strict
 from typing_extensions import Annotated
 
@@ -132,7 +131,7 @@ async def run_from_single_ble_connection(client: BleakClient):
     response_queue: asyncio.Queue[bytes] = asyncio.Queue()
 
     async def on_notification(_, ntf_bytes: bytearray):
-        logger.debug(f"on_notification")
+        logger.trace(f"Received notification")
         await response_queue.put(bytes(ntf_bytes))
 
     logger.debug("Starting notifications")
@@ -155,7 +154,7 @@ async def run_charger(scanner: RenogyScanner):
         device = await scanner.charger_device
         try:
             if device is None:
-                logger.debug("Charger not found during discovery")
+                logger.warning("Charger not found during discovery")
                 await asyncio.sleep(2.0)
                 continue
 

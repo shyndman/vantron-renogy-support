@@ -1,9 +1,7 @@
-import sys
 from asyncio import timeout as async_timeout
 from typing import Optional
 
 from bleak import BleakScanner
-from bleak.backends.bluezdbus.scanner import BlueZScannerArgs
 from bleak.backends.device import BLEDevice
 from loguru import logger
 
@@ -22,7 +20,7 @@ class RenogyScanner(BleakScanner):
         self.shunt_ble_address = shunt_ble_address.upper()
         super().__init__(*args, detection_callback=self.on_detection, **kwargs)
 
-    def on_detection(self, device, _):
+    def on_detection(self, device: BLEDevice, _):
         logger.trace(f"Detected: {device}")
 
     @property

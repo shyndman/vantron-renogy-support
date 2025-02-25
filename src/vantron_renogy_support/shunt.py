@@ -20,12 +20,12 @@ notification_count = 0
 async def read_from_ble_shunt(
     scanner: RenogyScanner, trigger_ble_reconnect: asyncio.Event
 ):
-    device = await scanner.shunt_device
+    ble_device = await scanner.shunt_device
     try:
-        if device is None:
-            logger.debug("Inverter not found during discovery")
+        if ble_device is None:
+            logger.warning("Shunt not found during discovery")
             raise ConnectionError()
-        await read_from_single_shunt_connection(device, trigger_ble_reconnect)
+        await read_from_single_shunt_connection(ble_device, trigger_ble_reconnect)
     except Exception:
         logger.exception("Error occurred")
         await asyncio.sleep(3.0)
@@ -59,18 +59,9 @@ class ShuntInfo(BaseModel):
     house_battery_temperature: Optional[float]
     vehicle_battery_voltage: Optional[NonNegativeFloat]
     vehicle_battery_temperature: Optional[float]
-    # raw_hex_bytes: str
 
 
 def parse_shunt_information(received_ts: datetime, notification_bytes: bytearray):
-    # ticks = int.from_bytes(notification_bytes[0x12 : (0x13 + 1)])
-    # start_ts = seconds_ago(seconds=ticks, ts=received_ts)
-    # We round the calculated start time so that it remains constant during
-    # the period
-    # rounded_start_ts = start_ts.replace(
-    #     minute=math.ceil(start_ts.minute / 10) * 10, second=0
-    # )
-
     vehicle_battery_voltage = (
         int.from_bytes(notification_bytes[0x1E : (0x1F + 1)]) / 1000
     )
@@ -114,14 +105,15 @@ async def write_shunt_data(ctx: dict, trigger_ble_reconnect: asyncio.Event):
     if raw_notification is None:
         logger.debug("MQTT: no data to write")
     elif ctx["last_write"] == notification_count:
-        logger.info("MQTT: no new data since last write. Triggering reconnect")
+        logger.debug("MQTT: no new data since last write. Triggering reconnect")
         trigger_ble_reconnect.set()
     else:
         ctx["last_write"] = notification_count
 
         received_ts, notification_bytes = raw_notification
         info = parse_shunt_information(received_ts, notification_bytes)
-        logger.info(f"Writing shunt update, {info}")
+        logger.info(f"MQTT: Writing shunt update")
+        logger.debug(info)
 
         async with MqttClient(
             const.MQTT_HOST, identifier=const.MQTT_CLIENT, clean_session=True
