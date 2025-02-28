@@ -86,12 +86,17 @@ async def mqtt_task(trigger_ble_reconnect):
     ctx = {
         "last_write": -1,
     }
-    await periodic_task(
-        const.MQTT_WRITE_INTERVAL,
-        write_shunt_data,
-        ctx=ctx,
-        trigger_ble_reconnect=trigger_ble_reconnect,
-    )
+    while True:
+        try:
+            await periodic_task(
+                const.MQTT_WRITE_INTERVAL,
+                write_shunt_data,
+                ctx=ctx,
+                trigger_ble_reconnect=trigger_ble_reconnect,
+            )
+        except:
+            logger.exception("Exception encountered in MQTT task")
+            await asyncio.sleep(2)
 
 
 async def write_shunt_data(ctx: dict, trigger_ble_reconnect: asyncio.Event):

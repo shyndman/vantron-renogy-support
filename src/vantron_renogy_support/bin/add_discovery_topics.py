@@ -1,6 +1,13 @@
 import os
-from ha_mqtt_discoverable import DeviceInfo, Settings
-from ha_mqtt_discoverable.sensors import Sensor, SensorInfo
+
+import stringcase
+from ha_mqtt_discoverable import DeviceInfo, Discoverable, Settings
+from ha_mqtt_discoverable.sensors import (
+    BinarySensor,
+    BinarySensorInfo,
+    Sensor,
+    SensorInfo,
+)
 
 from .. import const
 from ..charger import ChargingState
@@ -112,6 +119,15 @@ def run():
         connections=[("ble_mac", os.environ[const.ENV_CHARGER_BLE_ADDRESS])],
     )
 
+    charger_problems_info = DeviceInfo(
+        name="House Battery Charger: Problems Panel",
+        identifiers=["RBC2125DS-21W-Problems"],
+        model="IP67 DCDC Charger Problems Panel",
+        via_device="RBC2125DS-21W",
+        manufacturer="Renogy",
+    )
+
+
     def charger_infos(device_info: DeviceInfo):
         yield SensorInfo(
             name="Charge Voltage",
@@ -194,7 +210,7 @@ def run():
         )
 
         yield SensorInfo(
-            name="Temperature",
+            name="Charger Temperature",
             device=device_info,
             device_class="temperature",
             unit_of_measurement="°C",
@@ -217,7 +233,7 @@ def run():
             name="Days Operating",
             device=device_info,
             device_class="duration",
-            unit_of_measurement="days",
+            unit_of_measurement="d",
             state_class="total",
             unique_id=f"{device_info.name}.total_operating_days",
             value_template=json_value("total_operating_days"),
@@ -254,7 +270,7 @@ def run():
         yield SensorInfo(
             name="Total Charged Capacity",
             device=device_info,
-            device_class="battery_capacity",
+            device_class=None,  # Electric charge
             unit_of_measurement="Ah",
             unique_id=f"{device_info.name}.total_charging_amp_hours",
             value_template=json_value("total_charging_amp_hours"),
@@ -270,6 +286,36 @@ def run():
             value_template=json_value("total_kwh_generated"),
             expire_after=60,
         )
+
+    def charger_problem_infos(device_info: DeviceInfo):
+        for name in [
+            "any_problem_detected",
+            "charge_mosfet_short_circuit",
+            "anti_reverse_mosfet_short_circuit",
+            "solar_panel_reversely_connected",
+            "solar_panel_point_over_voltage",
+            "solar_panel_counter_current",
+            "solar_input_over_voltage",
+            "solar_input_short_circuit",
+            "solar_input_over_power",
+            "ambient_temperature_too_high",
+            "charger_temperature_too_high",
+            "load_over_power",
+            "load_short_circuit",
+            "battery_under_voltage",
+            "battery_over_voltage",
+            "battery_over_discharge",
+        ]:
+            field_name = name if name == "any_problem_detected" else f"problem_{name}"
+            yield BinarySensorInfo(
+                name=stringcase.titlecase(name),
+                device=device_info,
+                device_class="problem",
+                unique_id=f"{device_info.name}.{field_name}",
+                value_template=f"{{{{{{true: \"on\", false: \"off\"}}[{json_field_access(field_name)}] }}}}",
+                expire_after=60,
+            )
+
 
     inverter_info = DeviceInfo(
         name="Power Inverter",
@@ -331,7 +377,7 @@ def run():
         )
 
         yield SensorInfo(
-            name="Temperature",
+            name="Inverter Temperature",
             device=device_info,
             device_class="temperature",
             unit_of_measurement="°C",
@@ -349,14 +395,26 @@ def run():
         if s is not None:
             s.wait_for_publish()
 
-    for info in charger_infos(charger_info):
+    from itertools import chain
+    charger_and_problem_infos = chain.from_iterable([charger_infos(charger_info), charger_problem_infos(charger_problems_info)])
+
+    for info in charger_and_problem_infos:
         # Instantiate the sensor
-        s = Sensor(
-            settings=Settings(mqtt=mqtt_settings, entity=info),
-            make_state_topic=charger_state_topic,
-        ).write_config()
-        if s is not None:
-            s.wait_for_publish()
+        match info:
+            case BinarySensorInfo():
+                s = BinarySensor(
+                    settings=Settings(mqtt=mqtt_settings, entity=info),
+                    make_state_topic=charger_state_topic,
+                )
+            case SensorInfo():
+                s = Sensor(
+                    settings=Settings(mqtt=mqtt_settings, entity=info),
+                    make_state_topic=charger_state_topic,
+                )
+
+        write_info = s.write_config()
+        if write_info is not None:
+            write_info.wait_for_publish()
 
     for info in inverter_infos(inverter_info):
         # Instantiate the sensor

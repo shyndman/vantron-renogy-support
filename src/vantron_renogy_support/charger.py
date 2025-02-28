@@ -4,6 +4,7 @@ from enum import Enum
 
 import annotated_types
 from aiomqtt import Client as MqttClient
+from bitarray import bitarray
 from bleak import BleakClient
 from loguru import logger
 from pydantic import BaseModel, NonNegativeFloat, NonNegativeInt, Strict
@@ -51,16 +52,30 @@ class ChargerInfo(BaseModel):
     charger_temperature: float
     battery_temperature: float
 
+    charging_state: ChargingState
+
     total_operating_days: NonNegativeInt
     total_overdischarges: NonNegativeInt
     total_full_charges: NonNegativeInt
     total_charging_amp_hours: NonNegativeInt
     total_kwh_generated: NonNegativeFloat
 
-    charging_state: ChargingState
-    fault_bits: Annotated[
-        bytes, Strict(), annotated_types.Len(min_length=4, max_length=4)
-    ]
+    any_problem_detected: bool
+    problem_charge_mosfet_short_circuit: bool # b30
+    problem_anti_reverse_mosfet_short_circuit: bool # b29
+    problem_solar_panel_reversely_connected: bool # b28
+    problem_solar_panel_point_over_voltage: bool # b27
+    problem_solar_panel_counter_current: bool # b26
+    problem_solar_input_over_voltage: bool # b25
+    problem_solar_input_short_circuit: bool # b24
+    problem_solar_input_over_power: bool # b23
+    problem_ambient_temperature_too_high: bool # b22
+    problem_charger_temperature_too_high: bool # b21
+    problem_load_over_power: bool # b20
+    problem_load_short_circuit: bool # b19
+    problem_battery_under_voltage: bool # b18
+    problem_battery_over_voltage: bool # b17
+    problem_battery_over_discharge: bool # b16
 
 
 async def run_from_single_ble_connection(client: BleakClient):
@@ -113,6 +128,8 @@ def parse_charger_info(state_bytes: bytes, status_bytes: bytes) -> ChargerInfo:
     status_slice = functools.partial(
         field_slice, start_word=STATUS_START_WORD, bytes=status_bytes
     )
+    fault_bits = bitarray()
+    fault_bits.frombytes(status_slice(0x121, 4))
 
     return ChargerInfo(
         charge_voltage=round(int.from_bytes(state_slice(0x101, 2)) * 0.1, 2),
@@ -126,7 +143,24 @@ def parse_charger_info(state_bytes: bytes, status_bytes: bytes) -> ChargerInfo:
         charger_temperature=int.from_bytes([state_slice(0x103, 2)[0]], signed=True),
         battery_temperature=int.from_bytes([state_slice(0x103, 2)[1]], signed=True),
         charging_state=BYTE_TO_CHARGING_STATES[status_slice(0x120, 2)[1]],
-        fault_bits=status_slice(0x121, 4),
+
+        any_problem_detected=fault_bits.any(),
+        problem_charge_mosfet_short_circuit=bool(fault_bits[-15]),
+        problem_anti_reverse_mosfet_short_circuit=bool(fault_bits[-14]),
+        problem_solar_panel_reversely_connected=bool(fault_bits[-13]),
+        problem_solar_panel_point_over_voltage=bool(fault_bits[-12]),
+        problem_solar_panel_counter_current=bool(fault_bits[-11]),
+        problem_solar_input_over_voltage=bool(fault_bits[-10]),
+        problem_solar_input_short_circuit=bool(fault_bits[-9]),
+        problem_solar_input_over_power=bool(fault_bits[-8]),
+        problem_ambient_temperature_too_high=bool(fault_bits[-7]),
+        problem_charger_temperature_too_high=bool(fault_bits[-6]),
+        problem_load_over_power=bool(fault_bits[-5]),
+        problem_load_short_circuit=bool(fault_bits[-4]),
+        problem_battery_under_voltage=bool(fault_bits[-3]),
+        problem_battery_over_voltage=bool(fault_bits[-2]),
+        problem_battery_over_discharge=bool(fault_bits[-1]),
+
         total_operating_days=int.from_bytes(status_slice(0x115, 2)),
         total_overdischarges=int.from_bytes(status_slice(0x116, 2)),
         total_full_charges=int.from_bytes(status_slice(0x117, 2)),
