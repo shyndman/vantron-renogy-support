@@ -2,6 +2,7 @@ import asyncio
 import asyncio.staggered
 import functools
 from enum import Enum
+from typing import Callable
 
 from aiomqtt import Client as MqttClient
 from bleak import BleakClient
@@ -12,7 +13,7 @@ from pydantic import BaseModel, NonNegativeFloat
 from . import const
 from .util.asyncio_util import periodic_task
 from .util.ble_util import read_modbus_from_device
-from .util.modbus_util import field_slice
+from .util.modbus_util import GetFieldBytes, field_slice
 
 
 class PowerSavingMode(str, Enum):
@@ -39,19 +40,28 @@ class InverterInfo(BaseModel):
 
     inverter_temperature: float
 
-    # power_saving_mode: PowerSavingMode
-    # beep_switch: bool
-    # ng_bonding_enable: bool
+    power_saving_mode: PowerSavingMode  # 115C0001
+    beep_switch: bool  # 10050001
+    ng_bonding_enable: bool  # 100E0001
 
-    # OVER_VOLTS_PROTECTION
-    # OVER_VOLTS_RESTORE
-    # OVER_DISCHARGE_SHUTDOWN
-    # LOW_VOLTS_WARNING
-    # LOW_VOLTS_RESTORE
+    # over_volts_protection: float
+    # over_volts_restore: float
+    # over_volts_warning: float
+    # over_volts_restore: float
+    # over_discharge_shutdown
 
 
-STATE_START_WORD = 0x0FA0
-STATE_LEN = 7
+STATE_WORD_START = 0x0FA0
+STATE_WORD_LEN = 7
+
+BEEP_SWITCH_WORD_START = 0x1005
+BEEP_SWITCH_WORD_LEN = 1
+
+NG_BONDING_WORD_START = 0x100E
+NG_BONDING_WORD_LEN = 1
+
+POWER_SAVING_WORD_START = 0x115C
+POWER_SAVING_WORD_LEN = 1
 
 
 async def request_inverter_info(
@@ -64,15 +74,37 @@ async def request_inverter_info(
         write_characteristic=const.INVERTER_WRITE_CHARACTERISTIC,
         timeout=5.0,
     )
-    state_bytes = await read(STATE_START_WORD, STATE_LEN)
-    return parse_inverter_info(state_bytes)
 
-
-def parse_inverter_info(state_bytes: bytes) -> InverterInfo:
-    state_slice = functools.partial(
-        field_slice, start_word=STATE_START_WORD, bytes=state_bytes
+    return parse_inverter_info(
+        functools.partial(
+            field_slice,
+            start_word=STATE_WORD_START,
+            bytes=await read(STATE_WORD_START, STATE_WORD_LEN),
+        ),
+        functools.partial(
+            field_slice,
+            start_word=BEEP_SWITCH_WORD_START,
+            bytes=await read(BEEP_SWITCH_WORD_START, BEEP_SWITCH_WORD_LEN),
+        ),
+        functools.partial(
+            field_slice,
+            start_word=NG_BONDING_WORD_START,
+            bytes=await read(NG_BONDING_WORD_START, NG_BONDING_WORD_LEN),
+        ),
+        functools.partial(
+            field_slice,
+            start_word=POWER_SAVING_WORD_START,
+            bytes=await read(POWER_SAVING_WORD_START, POWER_SAVING_WORD_LEN),
+        ),
     )
 
+
+def parse_inverter_info(
+    state_slice: GetFieldBytes,
+    beep_switch_slice: GetFieldBytes,
+    ng_bonding_slice: GetFieldBytes,
+    power_saving_slice: GetFieldBytes,
+) -> InverterInfo:
     return InverterInfo(
         battery_voltage=round(int.from_bytes(state_slice(0x0FA5, 2)) * 0.1, 1),
         input_voltage=round(int.from_bytes(state_slice(0x0FA0, 2)) * 0.1, 2),
@@ -83,6 +115,11 @@ def parse_inverter_info(state_bytes: bytes) -> InverterInfo:
         ),
         output_frequency=int.from_bytes(state_slice(0x0FA4, 2)) * 0.01,
         inverter_temperature=int.from_bytes(state_slice(0x0FA6, 2), signed=True) * 0.1,
+        power_saving_mode=BYTES_TO_POWER_SAVING_MODE[
+            int.from_bytes(power_saving_slice(0x115E, 2))
+        ],
+        beep_switch=beep_switch_slice(0x1005, 1) == 1,
+        ng_bonding_enable=ng_bonding_slice(0x100E, 1) == 1,
     )
 
 
@@ -132,4 +169,4 @@ async def publish_inverter_state(ble_address: str):
         except Exception:
             logger.exception("Exception occurred. Reconnecting…")
         finally:
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(30.0)
