@@ -79,6 +79,7 @@ def run():
             value_template=f"{{{{({json_field_access("house_battery_voltage")} | float) * ({json_field_access("house_battery_current")} | float)}}}}",
             suggested_display_precision=3,
             expire_after=60,
+            force_update=True,
         )
 
         yield SensorInfo(
@@ -156,6 +157,7 @@ def run():
             unit_of_measurement="W",
             unique_id=f"{device_info.name}.charge_power",
             value_template=json_value("charge_power"),
+            force_update=True,
             expire_after=60,
         )
 
