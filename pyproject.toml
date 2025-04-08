@@ -6,7 +6,7 @@ authors = [{name = "Scott Hyndman", email = "scotty.hyndman@gmail.com"}]
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    "aiomqtt==2.3.0",
+    "aiomqtt==2.3.2",
     "ha-mqtt-discoverable @ git+https://github.com/shyndman/ha-mqtt-discoverable.git@main",
     "paho-mqtt==2.1.0",
     "pydantic==2.11.4",
