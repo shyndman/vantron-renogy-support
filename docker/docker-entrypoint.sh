@@ -2,10 +2,9 @@
 
 set -e
 
-source /venv/bin/activate
-
+# Cycle Bluetooth power, which helps with connection issues
 bluetoothctl power off
 bluetoothctl power on
 
-add_discovery_topics
-run_renogy_publisher
+uv run add_discovery_topics
+uv run run_renogy_publisher
