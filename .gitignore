@@ -2,3 +2,14 @@
 .vscode
 .venv
 __pycache__
+
+# Root-level symlinks managed by unroot-llm-files-pre-commit hook
+# These are symlinks pointing to files in .llm/ and should not be committed
+# The actual files are stored in .llm/ - commit changes there instead
+/.gemini
+/GEMINI.md
+/templates
+/CLAUDE.md
+/.claude
+/memory
+/specs
