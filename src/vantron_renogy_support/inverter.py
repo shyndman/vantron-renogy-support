@@ -1,12 +1,10 @@
 import asyncio
-import asyncio.staggered
 import functools
 from enum import Enum
-from typing import Callable
 
 from aiomqtt import Client as MqttClient
 from bleak import BleakClient
-from bleak.backends.device import BLEDevice
+from bleak.backends.characteristic import BleakGATTCharacteristic
 from loguru import logger
 from pydantic import BaseModel, NonNegativeFloat
 
@@ -44,12 +42,6 @@ class InverterInfo(BaseModel):
     beep_switch: bool  # 10050001
     ng_bonding_enable: bool  # 100E0001
 
-    # over_volts_protection: float
-    # over_volts_restore: float
-    # over_volts_warning: float
-    # over_volts_restore: float
-    # over_discharge_shutdown
-
 
 STATE_WORD_START = 0x0FA0
 STATE_WORD_LEN = 7
@@ -65,7 +57,7 @@ POWER_SAVING_WORD_LEN = 1
 
 
 async def request_inverter_info(
-    client: BleakClient, response_queue: asyncio.Queue
+    client: BleakClient, response_queue: asyncio.Queue[bytes]
 ) -> InverterInfo:
     read = functools.partial(
         read_modbus_from_device,
@@ -76,22 +68,22 @@ async def request_inverter_info(
     )
 
     return parse_inverter_info(
-        functools.partial(
+        state_slice=functools.partial(
             field_slice,
             start_word=STATE_WORD_START,
             bytes=await read(STATE_WORD_START, STATE_WORD_LEN),
         ),
-        functools.partial(
+        beep_switch_slice=functools.partial(
             field_slice,
             start_word=BEEP_SWITCH_WORD_START,
             bytes=await read(BEEP_SWITCH_WORD_START, BEEP_SWITCH_WORD_LEN),
         ),
-        functools.partial(
+        ng_bonding_slice=functools.partial(
             field_slice,
             start_word=NG_BONDING_WORD_START,
             bytes=await read(NG_BONDING_WORD_START, NG_BONDING_WORD_LEN),
         ),
-        functools.partial(
+        power_saving_slice=functools.partial(
             field_slice,
             start_word=POWER_SAVING_WORD_START,
             bytes=await read(POWER_SAVING_WORD_START, POWER_SAVING_WORD_LEN),
@@ -118,8 +110,8 @@ def parse_inverter_info(
         power_saving_mode=BYTES_TO_POWER_SAVING_MODE[
             int.from_bytes(power_saving_slice(0x115E, 2))
         ],
-        beep_switch=beep_switch_slice(0x1005, 1) == 1,
-        ng_bonding_enable=ng_bonding_slice(0x100E, 1) == 1,
+        beep_switch=beep_switch_slice(0x1005, 1)[0] == 1,
+        ng_bonding_enable=ng_bonding_slice(0x100E, 1)[0] == 1,
     )
 
 
@@ -138,11 +130,11 @@ async def write_to_mqtt(info: InverterInfo) -> None:
 async def run_from_single_ble_connection(client: BleakClient):
     response_queue: asyncio.Queue[bytes] = asyncio.Queue()
 
-    async def on_notification(_, ntf_bytes: bytearray):
+    async def on_notification(_: BleakGATTCharacteristic, ntf_bytes: bytearray) -> None:
         logger.trace("Notification received")
         await response_queue.put(bytes(ntf_bytes))
 
-    logger.debug(f"Starting notifications")
+    logger.debug("Starting notifications")
     await client.start_notify(
         const.INVERTER_NOTIFICATION_CHARACTERISTIC, callback=on_notification
     )

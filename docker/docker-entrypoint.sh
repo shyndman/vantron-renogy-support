@@ -6,5 +6,4 @@ set -e
 bluetoothctl power off
 bluetoothctl power on
 
-uv run add_discovery_topics
-uv run run_renogy_publisher
+uv run broadcast_renogy_to_mqtt

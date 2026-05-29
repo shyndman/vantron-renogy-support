@@ -1,14 +1,13 @@
 import asyncio
 import functools
+from bleak.backends.characteristic import BleakGATTCharacteristic
 from enum import Enum
 
-import annotated_types
 from aiomqtt import Client as MqttClient
 from bitarray import bitarray
 from bleak import BleakClient
 from loguru import logger
-from pydantic import BaseModel, NonNegativeFloat, NonNegativeInt, Strict
-from typing_extensions import Annotated
+from pydantic import BaseModel, NonNegativeFloat, NonNegativeInt
 
 from . import const
 from .util.asyncio_util import periodic_task
@@ -61,28 +60,28 @@ class ChargerInfo(BaseModel):
     total_kwh_generated: NonNegativeFloat
 
     any_problem_detected: bool
-    problem_charge_mosfet_short_circuit: bool # b30
-    problem_anti_reverse_mosfet_short_circuit: bool # b29
-    problem_solar_panel_reversely_connected: bool # b28
-    problem_solar_panel_point_over_voltage: bool # b27
-    problem_solar_panel_counter_current: bool # b26
-    problem_solar_input_over_voltage: bool # b25
-    problem_solar_input_short_circuit: bool # b24
-    problem_solar_input_over_power: bool # b23
-    problem_ambient_temperature_too_high: bool # b22
-    problem_charger_temperature_too_high: bool # b21
-    problem_load_over_power: bool # b20
-    problem_load_short_circuit: bool # b19
-    problem_battery_under_voltage: bool # b18
-    problem_battery_over_voltage: bool # b17
-    problem_battery_over_discharge: bool # b16
+    problem_charge_mosfet_short_circuit: bool  # b30
+    problem_anti_reverse_mosfet_short_circuit: bool  # b29
+    problem_solar_panel_reversely_connected: bool  # b28
+    problem_solar_panel_point_over_voltage: bool  # b27
+    problem_solar_panel_counter_current: bool  # b26
+    problem_solar_input_over_voltage: bool  # b25
+    problem_solar_input_short_circuit: bool  # b24
+    problem_solar_input_over_power: bool  # b23
+    problem_ambient_temperature_too_high: bool  # b22
+    problem_charger_temperature_too_high: bool  # b21
+    problem_load_over_power: bool  # b20
+    problem_load_short_circuit: bool  # b19
+    problem_battery_under_voltage: bool  # b18
+    problem_battery_over_voltage: bool  # b17
+    problem_battery_over_discharge: bool  # b16
 
 
 async def run_from_single_ble_connection(client: BleakClient):
     response_queue: asyncio.Queue[bytes] = asyncio.Queue()
 
-    async def on_notification(_, ntf_bytes: bytearray):
-        logger.trace(f"Received notification")
+    async def on_notification(_: BleakGATTCharacteristic, ntf_bytes: bytearray) -> None:
+        logger.trace("Received notification")
         await response_queue.put(bytes(ntf_bytes))
 
     logger.debug("Starting notifications")
@@ -107,7 +106,7 @@ STATUS_LEN = 14
 
 
 async def request_charger_info(
-    client: BleakClient, response_queue: asyncio.Queue
+    client: BleakClient, response_queue: asyncio.Queue[bytes]
 ) -> ChargerInfo:
     read = functools.partial(
         read_modbus_from_device,
@@ -143,7 +142,6 @@ def parse_charger_info(state_bytes: bytes, status_bytes: bytes) -> ChargerInfo:
         charger_temperature=int.from_bytes([state_slice(0x103, 2)[0]], signed=True),
         battery_temperature=int.from_bytes([state_slice(0x103, 2)[1]], signed=True),
         charging_state=BYTE_TO_CHARGING_STATES[status_slice(0x120, 2)[1]],
-
         any_problem_detected=fault_bits.any(),
         problem_charge_mosfet_short_circuit=bool(fault_bits[-15]),
         problem_anti_reverse_mosfet_short_circuit=bool(fault_bits[-14]),
@@ -160,7 +158,6 @@ def parse_charger_info(state_bytes: bytes, status_bytes: bytes) -> ChargerInfo:
         problem_battery_under_voltage=bool(fault_bits[-3]),
         problem_battery_over_voltage=bool(fault_bits[-2]),
         problem_battery_over_discharge=bool(fault_bits[-1]),
-
         total_operating_days=int.from_bytes(status_slice(0x115, 2)),
         total_overdischarges=int.from_bytes(status_slice(0x116, 2)),
         total_full_charges=int.from_bytes(status_slice(0x117, 2)),

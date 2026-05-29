@@ -24,28 +24,32 @@ run_renogy_publisher = 'vantron_renogy_support.bin.run_renogy_publisher:run'
 requires = ["uv_build>=0.8.19,<0.9.0"]
 build-backend = "uv_build"
 
-[tool.pyright]
+[tool.basedpyright]
 include = ["src", "tests"]
 ignore = ["**/.venv"]
-defineConstant = {DEBUG = true}
-reportMissingImports = "error"
-deprecateTypingAliases = true
-reportDeprecated = "information"
+pythonVersion = "3.12"
 pythonPlatform = "Linux"
+typeCheckingMode = "recommended"
+defineConstant = {DEBUG = true}
 
-[tool.ruff]
-line-length = 100
-target-version = "py312"
-indent-width = 2
+[dependency-groups]
+dev = [
+    "basedpyright>=1.39.6",
+]
 
-[tool.ruff.lint]
-select = ["E", "F", "I", "W"]
-ignore = []
+# [tool.ruff]
+# line-length = 100
+# target-version = "py312"
+# indent-width = 2
 
-[tool.ruff.lint.isort]
-known-first-party = ["vantron_renogy_support"]
+# [tool.ruff.lint]
+# select = ["E", "F", "I", "W"]
+# ignore = []
 
-[tool.ruff.format]
-quote-style = "double"
-indent-style = "space"
-line-ending = "auto"
+# [tool.ruff.lint.isort]
+# known-first-party = ["vantron_renogy_support"]
+
+# [tool.ruff.format]
+# quote-style = "double"
+# indent-style = "space"
+# line-ending = "auto"

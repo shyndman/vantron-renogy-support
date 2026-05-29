@@ -1,18 +1,17 @@
 import asyncio
-from datetime import datetime, timezone
-from typing import Optional
 
 from aiomqtt import Client as MqttClient
 from bleak import BleakClient
-from bleak.backends.device import BLEDevice
+from bleak.backends.characteristic import BleakGATTCharacteristic
 from loguru import logger
 from pydantic import BaseModel, NonNegativeFloat
 
 from . import const
+from .parse import parse_fixed_short_as_float, parse_optional_temperature
 from .util.asyncio_util import periodic_task
 
 # Cheeky cheeky global state
-raw_notification = None
+raw_notification: bytearray | None = None
 notification_count = 0
 
 
@@ -32,58 +31,47 @@ async def read_from_single_shunt_connection(
     async with BleakClient(ble_address) as client:
         logger.info(f"Connected to device at {ble_address}")
 
-        def notification_handler(_, msg_bytes: bytearray):
+        def notification_handler(
+            _: BleakGATTCharacteristic, msg_bytes: bytearray
+        ) -> None:
             logger.trace(f"Notification received, {msg_bytes}")
             global raw_notification, notification_count
 
             if msg_bytes[0x03] == 0x19:
-                raw_notification = (datetime.now(tz=timezone.utc), msg_bytes)
+                raw_notification = msg_bytes
                 notification_count += 1
 
         logger.debug("Starting notifications")
         await client.start_notify(
             const.SHUNT_NOTIFICATION_CHARACTERISTIC, notification_handler
         )
-        await trigger_ble_reconnect.wait()
+        _ = await trigger_ble_reconnect.wait()
         trigger_ble_reconnect.clear()
 
 
 class ShuntInfo(BaseModel):
     house_battery_current: float
     house_battery_voltage: NonNegativeFloat
-    house_battery_temperature: Optional[float]
-    vehicle_battery_voltage: Optional[NonNegativeFloat]
-    vehicle_battery_temperature: Optional[float]
+    house_battery_temperature: float | None
+    vehicle_battery_voltage: NonNegativeFloat | None
+    vehicle_battery_temperature: float | None
 
 
-def parse_shunt_information(received_ts: datetime, notification_bytes: bytearray):
-    vehicle_battery_voltage = (
-        int.from_bytes(notification_bytes[0x1E : (0x1F + 1)]) / 1000
-    )
+def parse_shunt_information(msg: bytearray) -> ShuntInfo:
+    vehicle_battery_voltage = int.from_bytes(msg[0x1E : (0x1F + 1)]) / 1000
     return ShuntInfo(
-        house_battery_current=int.from_bytes(
-            notification_bytes[0x16 : (0x17 + 1)], signed=True
-        )
-        / 1000,
-        house_battery_voltage=int.from_bytes(notification_bytes[0x1A : (0x1B + 1)])
-        / 1000,
-        house_battery_temperature=parse_optional_temperature(notification_bytes, 0x42),
+        house_battery_current=parse_fixed_short_as_float(msg, addr=0x16, precision=3),
+        house_battery_voltage=parse_fixed_short_as_float(msg, addr=0x1A, precision=3),
+        house_battery_temperature=parse_optional_temperature(msg, 0x42),
         vehicle_battery_voltage=(
             vehicle_battery_voltage if vehicle_battery_voltage != 0.0 else None
         ),
-        vehicle_battery_temperature=parse_optional_temperature(
-            notification_bytes, 0x46
-        ),
+        vehicle_battery_temperature=parse_optional_temperature(msg, 0x46),
     )
 
 
-def parse_optional_temperature(barr: bytearray, i: int) -> Optional[float]:
-    raw = int.from_bytes(barr[i : (i + 2)], signed=True)
-    return None if raw == const.MIN_I16 else raw / 10
-
-
-async def mqtt_task(trigger_ble_reconnect):
-    ctx = {
+async def mqtt_task(trigger_ble_reconnect: asyncio.Event) -> None:
+    ctx: dict[str, int] = {
         "last_write": -1,
     }
     while True:
@@ -94,12 +82,14 @@ async def mqtt_task(trigger_ble_reconnect):
                 ctx=ctx,
                 trigger_ble_reconnect=trigger_ble_reconnect,
             )
-        except:
+        except Exception:
             logger.exception("Exception encountered in MQTT task")
             await asyncio.sleep(2)
 
 
-async def write_shunt_data(ctx: dict, trigger_ble_reconnect: asyncio.Event):
+async def write_shunt_data(
+    ctx: dict[str, int], trigger_ble_reconnect: asyncio.Event
+) -> None:
     global raw_notification, notification_count
 
     if raw_notification is None:
@@ -110,9 +100,9 @@ async def write_shunt_data(ctx: dict, trigger_ble_reconnect: asyncio.Event):
     else:
         ctx["last_write"] = notification_count
 
-        received_ts, notification_bytes = raw_notification
-        info = parse_shunt_information(received_ts, notification_bytes)
-        logger.info(f"MQTT: Writing shunt update")
+        notification_bytes = raw_notification
+        info = parse_shunt_information(notification_bytes)
+        logger.info("MQTT: Writing shunt update")
         logger.debug(info)
 
         async with MqttClient(
@@ -127,5 +117,5 @@ async def write_shunt_data(ctx: dict, trigger_ble_reconnect: asyncio.Event):
 async def publish_shunt_state(ble_address: str):
     reconnect_trigger = asyncio.Event()
     async with asyncio.TaskGroup() as tg:
-        tg.create_task(read_from_ble_shunt(ble_address, reconnect_trigger))
-        tg.create_task(mqtt_task(reconnect_trigger))
+        _ = tg.create_task(read_from_ble_shunt(ble_address, reconnect_trigger))
+        _ = tg.create_task(mqtt_task(reconnect_trigger))
